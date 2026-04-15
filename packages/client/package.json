@@ -4,15 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --build",
+    "dev": "vite",
+    "build": "tsc --build && vite build",
+    "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@go-op/map": "workspace:*",
+    "@go-op/math": "workspace:*",
     "@go-op/protocol": "workspace:*",
     "@go-op/types": "workspace:*",
-    "@go-op/map": "workspace:*",
-    "@go-op/math": "workspace:*"
+    "pixi.js": "^8.18.1"
+  },
+  "devDependencies": {
+    "vite": "^8.0.8"
   }
 }

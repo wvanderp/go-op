@@ -6,14 +6,20 @@
   "scripts": {
     "build": "tsc --build",
     "start": "node dist/index.js",
+    "dev": "tsx --conditions source src/run.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@go-op/map": "workspace:*",
+    "@go-op/math": "workspace:*",
     "@go-op/protocol": "workspace:*",
     "@go-op/types": "workspace:*",
-    "@go-op/map": "workspace:*",
-    "@go-op/math": "workspace:*"
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.21.0"
   }
 }
