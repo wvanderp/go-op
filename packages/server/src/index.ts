@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { createMap, setTile, findPath } from "@go-op/map";
 import {
   type TileMap,
+  type TilePos,
   type Unit,
   type GameState,
   TileType,
@@ -23,6 +24,20 @@ export interface GameServer {
   readonly port: number;
 }
 
+interface ActiveMovement {
+  readonly unitId: string;
+  readonly path: readonly TilePos[];
+  readonly nextIndex: number;
+  readonly progressTiles: number;
+}
+
+interface CreateGameServerOptions {
+  readonly tickMs?: number;
+  readonly now?: () => number;
+}
+
+const DEFAULT_SERVER_TICK_MS = 50;
+
 function createInitialMap(): TileMap {
   let map = createMap(64, 64);
 
@@ -40,14 +55,25 @@ function createInitialMap(): TileMap {
   return map;
 }
 
-export function createGameServer(port: number): GameServer {
+export function createGameServer(
+  port: number,
+  options: CreateGameServerOptions = {},
+): GameServer {
   let wss: WebSocketServer | null = null;
   let actualPort = port;
+  let tickTimer: ReturnType<typeof setInterval> | null = null;
+  let lastTickAtMs = 0;
+  const tickMs = Math.max(10, options.tickMs ?? DEFAULT_SERVER_TICK_MS);
+  const now = options.now ?? (() => Date.now());
+  const activeMovements = new Map<string, ActiveMovement>();
 
   // Mutable game state
   let state: GameState = {
     map: createInitialMap(),
-    units: [{ id: "unit-1", pos: createTilePos(0, 0) }],
+    units: [
+      { id: "unit-1", pos: createTilePos(0, 0), speedTilesPerSecond: 1 },
+      { id: "unit-2", pos: createTilePos(2, 2), speedTilesPerSecond: 1 },
+    ],
   };
 
   function broadcast(msg: ServerMessage): void {
@@ -59,6 +85,86 @@ export function createGameServer(port: number): GameServer {
 
   function sendTo(ws: WebSocket, msg: ServerMessage): void {
     ws.send(encodeMessage(msg));
+  }
+
+  function updateUnitPosition(
+    units: readonly Unit[],
+    unitId: string,
+    pos: TilePos,
+  ): readonly Unit[] {
+    return units.map((unit) =>
+      unit.id === unitId ? { ...unit, pos } : unit,
+    );
+  }
+
+  function stepMovements(deltaMs: number): boolean {
+    if (activeMovements.size === 0) {
+      return false;
+    }
+
+    const deltaSeconds = deltaMs / 1000;
+    let movedAnyUnit = false;
+    let nextUnits = state.units;
+
+    for (const [unitId, movement] of [...activeMovements.entries()]) {
+      const unit = state.units.find((entry) => entry.id === unitId)!;
+      const speed = Math.max(0, unit.speedTilesPerSecond);
+
+      let progressTiles = movement.progressTiles + speed * deltaSeconds;
+      let nextIndex = movement.nextIndex;
+      let latestPos: TilePos | null = null;
+
+      while (progressTiles >= 1 && nextIndex < movement.path.length) {
+        latestPos = movement.path[nextIndex]!;
+        nextIndex += 1;
+        progressTiles -= 1;
+      }
+
+      if (latestPos) {
+        nextUnits = updateUnitPosition(nextUnits, unitId, latestPos);
+        movedAnyUnit = true;
+      }
+
+      if (nextIndex >= movement.path.length) {
+        activeMovements.delete(unitId);
+      } else {
+        activeMovements.set(unitId, {
+          unitId,
+          path: movement.path,
+          nextIndex,
+          progressTiles,
+        });
+      }
+    }
+
+    if (!movedAnyUnit) {
+      return false;
+    }
+
+    state = { ...state, units: nextUnits };
+    return true;
+  }
+
+  function startTickLoop(): void {
+    lastTickAtMs = now();
+    tickTimer = setInterval(() => {
+      const current = now();
+      const deltaMs = current - lastTickAtMs;
+      lastTickAtMs = current;
+
+      if (stepMovements(deltaMs)) {
+        broadcast({ type: "state", state });
+      }
+    }, tickMs);
+  }
+
+  function stopTickLoop(): void {
+    if (!tickTimer) {
+      return;
+    }
+
+    clearInterval(tickTimer);
+    tickTimer = null;
   }
 
   function handleMessage(ws: WebSocket, raw: string): void {
@@ -88,21 +194,22 @@ export function createGameServer(port: number): GameServer {
       return;
     }
 
-    // Update unit position to destination
-    const destination = path[path.length - 1]!;
-    const unitIdx = state.units.findIndex((u) => u.id === clientMsg.unitId);
-    const updatedUnits = [...state.units];
-    updatedUnits[unitIdx] = { ...updatedUnits[unitIdx]!, pos: destination };
-    state = { ...state, units: updatedUnits };
+    if (path.length > 1) {
+      activeMovements.set(clientMsg.unitId, {
+        unitId: clientMsg.unitId,
+        path,
+        nextIndex: 1,
+        progressTiles: 0,
+      });
+    }
 
-    // Broadcast move result and updated state
+    // Broadcast move result. State is broadcast as movement progresses.
     broadcast({
       type: "moveResult",
       unitId: clientMsg.unitId,
       path,
       success: true,
     });
-    broadcast({ type: "state", state });
   }
 
   return {
@@ -112,6 +219,7 @@ export function createGameServer(port: number): GameServer {
     start() {
       return new Promise<void>((resolve) => {
         wss = new WebSocketServer({ port });
+        startTickLoop();
 
         wss.on("connection", (ws) => {
           // Send current state to new client
@@ -131,6 +239,8 @@ export function createGameServer(port: number): GameServer {
 
     stop() {
       return new Promise<void>((resolve) => {
+        stopTickLoop();
+
         if (!wss) {
           resolve();
           return;

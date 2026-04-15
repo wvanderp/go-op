@@ -128,7 +128,7 @@ describe("createGameSceneRenderer", () => {
       tileHeight: 32,
     });
     const firstState = createState([
-      { id: "unit-1", pos: createTilePos(0, 0) },
+      { id: "unit-1", pos: createTilePos(0, 0), speedTilesPerSecond: 1 },
     ]);
 
     renderer.sync(firstState, [createTilePos(0, 0), createTilePos(1, 0)]);
@@ -142,7 +142,9 @@ describe("createGameSceneRenderer", () => {
     renderer.setCamera(128, -96);
 
     renderer.sync(
-      createState([{ id: "unit-1", pos: createTilePos(1, 1) }]),
+      createState([
+        { id: "unit-1", pos: createTilePos(1, 1), speedTilesPerSecond: 1 },
+      ]),
       [createTilePos(0, 0), createTilePos(1, 0)],
     );
 
@@ -171,8 +173,8 @@ describe("createGameSceneRenderer", () => {
 
     renderer.sync(
       createState([
-        { id: "unit-1", pos: createTilePos(0, 0) },
-        { id: "unit-2", pos: createTilePos(1, 0) },
+        { id: "unit-1", pos: createTilePos(0, 0), speedTilesPerSecond: 1 },
+        { id: "unit-2", pos: createTilePos(1, 0), speedTilesPerSecond: 1 },
       ]),
       null,
     );
@@ -183,7 +185,9 @@ describe("createGameSceneRenderer", () => {
     const unitTwoLabel = factory.labels[1];
 
     renderer.sync(
-      createState([{ id: "unit-2", pos: createTilePos(1, 1) }]),
+      createState([
+        { id: "unit-2", pos: createTilePos(1, 1), speedTilesPerSecond: 1 },
+      ]),
       null,
     );
 
@@ -250,7 +254,9 @@ describe("createGameSceneRenderer", () => {
     });
 
     renderer.sync(
-      createStateWithBlockedTile([{ id: "unit-1", pos: createTilePos(0, 0) }]),
+      createStateWithBlockedTile([
+        { id: "unit-1", pos: createTilePos(0, 0), speedTilesPerSecond: 1 },
+      ]),
       null,
     );
 

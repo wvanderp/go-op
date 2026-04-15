@@ -6,6 +6,11 @@ import {
   createGameSceneRenderer,
   type GameSceneRenderer,
 } from "./renderer.js";
+import {
+  createUnitPathAnimation,
+  sampleUnitPathAnimation,
+  type UnitPathAnimation,
+} from "./movement-animation.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -28,6 +33,7 @@ let gameState: GameState | null = null;
 let ws: WebSocket | null = null;
 let lastPath: TilePos[] | null = null;
 let sceneRenderer: GameSceneRenderer | null = null;
+const unitAnimations = new Map<string, UnitPathAnimation>();
 
 // Camera (pan offset)
 let cameraX = 0;
@@ -68,6 +74,11 @@ async function init(): Promise<void> {
   });
   sceneRenderer.setCamera(cameraX, cameraY);
 
+  const onTick = (): void => {
+    renderFrame(performance.now());
+  };
+  app.ticker.add(onTick);
+
   const cleanupInput = setupInput();
   const cleanupSocket = connectToServer();
 
@@ -80,6 +91,7 @@ async function init(): Promise<void> {
     disposed = true;
     cleanupInput();
     cleanupSocket();
+    app.ticker.remove(onTick);
     sceneRenderer?.destroy();
     sceneRenderer = null;
   };
@@ -92,11 +104,38 @@ async function init(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 function syncScene(): void {
-  if (!gameState || !sceneRenderer) {
+  renderFrame(performance.now());
+}
+
+function renderFrame(nowMs: number): void {
+  if (!sceneRenderer || !gameState) {
     return;
   }
 
-  sceneRenderer.sync(gameState, lastPath);
+  let hasAnimatedUnits = false;
+  const units = gameState.units.map((unit) => {
+    const animation = unitAnimations.get(unit.id);
+    if (!animation) {
+      return unit;
+    }
+
+    const sample = sampleUnitPathAnimation(animation, nowMs);
+    if (sample.done) {
+      unitAnimations.delete(unit.id);
+      return unit;
+    }
+
+    hasAnimatedUnits = true;
+    return {
+      ...unit,
+      pos: sample.pos,
+    };
+  });
+
+  const renderState: GameState = hasAnimatedUnits
+    ? { ...gameState, units }
+    : gameState;
+  sceneRenderer.sync(renderState, lastPath);
 }
 
 // ---------------------------------------------------------------------------
@@ -214,7 +253,19 @@ function connectToServer(): () => void {
     } else if (msg.type === "moveResult") {
       if (msg.success) {
         lastPath = [...msg.path];
-        statusEl.textContent = `Moved to (${msg.path[msg.path.length - 1]!.x}, ${msg.path[msg.path.length - 1]!.y})`;
+
+        const unit = gameState?.units.find((entry) => entry.id === msg.unitId);
+        const animation = createUnitPathAnimation(
+          msg.path,
+          unit?.speedTilesPerSecond ?? 1,
+          performance.now(),
+          unit?.pos,
+        );
+        if (animation) {
+          unitAnimations.set(msg.unitId, animation);
+        }
+
+        statusEl.textContent = `Moving to (${msg.path[msg.path.length - 1]!.x}, ${msg.path[msg.path.length - 1]!.y})...`;
         syncScene();
       } else {
         statusEl.textContent = "Move failed!";

@@ -28,7 +28,7 @@ describe("encodeMessage", () => {
       type: "state",
       state: {
         map: { width: 2, height: 2, tiles: [0, 0, 0, 0] },
-        units: [{ id: "u1", pos: { x: 1, y: 1 } }],
+        units: [{ id: "u1", pos: { x: 1, y: 1 }, speedTilesPerSecond: 1 }],
       },
     };
     const json = encodeMessage(msg);

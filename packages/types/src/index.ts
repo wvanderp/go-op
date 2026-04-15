@@ -55,6 +55,7 @@ export function isWalkable(map: TileMap, x: number, y: number): boolean {
 export interface Unit {
   readonly id: string;
   readonly pos: TilePos;
+  readonly speedTilesPerSecond: number;
 }
 
 export interface GameState {
