@@ -45,6 +45,14 @@ Research should create hard strategic forks. Expected branches include logistics
 
 If multiplayer exists, players share control of the same army with no unit ownership. Coordination is solved socially through pings, planning tools, and visible intent markers rather than permissions or hard locks. This should feel like multiple operators working one war table, not several players partitioning a base.
 
+## Roster Reference (Draft v1)
+
+The first-draft faction roster is split across three documents. Names are hybrid (flavor codename + functional class) and subject to balance iteration.
+
+- [roster-units.md](roster-units.md) — Mobile creatures: Gobbet, Trundle, Peeper, Pinger, Popper, Bristle
+- [roster-structures.md](roster-structures.md) — Static structures: Maw, Crucible, Needle, Reacher, Anchor, Thumper, Lobber, Vein
+- [roster-map-objects.md](roster-map-objects.md) — Map objects: goop sources, puddles, zones, Worldbreaker
+
 ## Technical and Structural Pillars
 
 - Square grid board to simplify deterministic liquid simulation.
