@@ -1,0 +1,18 @@
+{
+  "name": "@go-op/client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@go-op/protocol": "workspace:*",
+    "@go-op/types": "workspace:*",
+    "@go-op/map": "workspace:*",
+    "@go-op/math": "workspace:*"
+  }
+}

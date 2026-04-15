@@ -1,0 +1,23 @@
+{
+  "name": "@go-op/map",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@go-op/types": "workspace:*",
+    "@go-op/math": "workspace:*"
+  },
+  "files": ["dist"]
+}

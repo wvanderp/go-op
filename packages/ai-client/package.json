@@ -1,0 +1,17 @@
+{
+  "name": "@go-op/ai-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --build",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@go-op/protocol": "workspace:*",
+    "@go-op/types": "workspace:*"
+  }
+}
