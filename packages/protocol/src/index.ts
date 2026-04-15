@@ -1,4 +1,4 @@
-import type { GameState, TilePos } from "@go-op/types";
+import type { GameState, TilePos, Unit, UnitAction } from "@go-op/types";
 
 // ---------------------------------------------------------------------------
 // Client → Server Messages
@@ -24,8 +24,15 @@ export interface StateUpdate {
 export interface MoveResult {
   readonly type: "moveResult";
   readonly unitId: string;
-  readonly path: readonly TilePos[];
   readonly success: boolean;
+}
+
+export interface UnitStep {
+  readonly type: "unitStep";
+  readonly unitId: string;
+  readonly from: TilePos;
+  readonly to: TilePos;
+  readonly durationMs: number;
 }
 
 export interface ErrorMessage {
@@ -33,7 +40,28 @@ export interface ErrorMessage {
   readonly message: string;
 }
 
-export type ServerMessage = StateUpdate | MoveResult | ErrorMessage;
+// ---------------------------------------------------------------------------
+// Differential State Updates
+// ---------------------------------------------------------------------------
+
+export interface UnitDiff {
+  readonly unitId: string;
+  readonly pos?: TilePos;
+  readonly action?: UnitAction;
+}
+
+export interface StateDiff {
+  readonly type: "stateDiff";
+  readonly tick: number;
+  readonly unitUpdates: readonly UnitDiff[];
+}
+
+export type ServerMessage =
+  | StateUpdate
+  | MoveResult
+  | UnitStep
+  | ErrorMessage
+  | StateDiff;
 
 // ---------------------------------------------------------------------------
 // Serialization
@@ -81,12 +109,29 @@ export function decodeServerMessage(raw: string): ServerMessage {
   if (obj.type === "moveResult") {
     if (
       typeof obj.unitId !== "string" ||
-      !Array.isArray(obj.path) ||
       typeof obj.success !== "boolean"
     ) {
       throw new Error("MoveResult: missing fields");
     }
     return obj as unknown as MoveResult;
+  }
+
+  if (obj.type === "unitStep") {
+    const from = obj.from as Record<string, unknown> | undefined;
+    const to = obj.to as Record<string, unknown> | undefined;
+    if (
+      typeof obj.unitId !== "string" ||
+      !from ||
+      typeof from.x !== "number" ||
+      typeof from.y !== "number" ||
+      !to ||
+      typeof to.x !== "number" ||
+      typeof to.y !== "number" ||
+      typeof obj.durationMs !== "number"
+    ) {
+      throw new Error("UnitStep: missing fields");
+    }
+    return obj as unknown as UnitStep;
   }
 
   if (obj.type === "error") {
@@ -96,5 +141,67 @@ export function decodeServerMessage(raw: string): ServerMessage {
     return obj as unknown as ErrorMessage;
   }
 
+  if (obj.type === "stateDiff") {
+    if (
+      typeof obj.tick !== "number" ||
+      !Array.isArray(obj.unitUpdates)
+    ) {
+      throw new Error("StateDiff: missing fields");
+    }
+    return obj as unknown as StateDiff;
+  }
+
   throw new Error(`Unknown server message type: ${String(obj.type)}`);
+}
+
+// ---------------------------------------------------------------------------
+// State Diff Utilities
+// ---------------------------------------------------------------------------
+
+export function computeStateDiff(
+  previousUnits: readonly Unit[],
+  currentUnits: readonly Unit[],
+  tick: number,
+): StateDiff {
+  const unitUpdates: UnitDiff[] = [];
+
+  for (const current of currentUnits) {
+    const previous = previousUnits.find((u) => u.id === current.id);
+    const posChanged =
+      !previous ||
+      previous.pos.x !== current.pos.x ||
+      previous.pos.y !== current.pos.y;
+    const actionChanged =
+      !previous || previous.action.type !== current.action.type;
+
+    if (posChanged || actionChanged) {
+      unitUpdates.push({
+        unitId: current.id,
+        ...(posChanged ? { pos: current.pos } : {}),
+        ...(actionChanged ? { action: current.action } : {}),
+      });
+    }
+  }
+
+  return { type: "stateDiff", tick, unitUpdates };
+}
+
+export function applyStateDiff(
+  state: GameState,
+  diff: StateDiff,
+): GameState {
+  const units = [...state.units];
+
+  for (const update of diff.unitUpdates) {
+    const index = units.findIndex((u) => u.id === update.unitId);
+    if (index === -1) continue;
+
+    units[index] = {
+      ...units[index]!,
+      ...(update.pos !== undefined ? { pos: update.pos } : {}),
+      ...(update.action !== undefined ? { action: update.action } : {}),
+    };
+  }
+
+  return { ...state, units };
 }

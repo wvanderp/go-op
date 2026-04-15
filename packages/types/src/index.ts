@@ -49,6 +49,14 @@ export function isWalkable(map: TileMap, x: number, y: number): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Unit Actions
+// ---------------------------------------------------------------------------
+
+export type UnitAction =
+  | { readonly type: "idle" }
+  | { readonly type: "moving" };
+
+// ---------------------------------------------------------------------------
 // Game Entities
 // ---------------------------------------------------------------------------
 
@@ -56,6 +64,7 @@ export interface Unit {
   readonly id: string;
   readonly pos: TilePos;
   readonly speedTilesPerSecond: number;
+  readonly action: UnitAction;
 }
 
 export interface GameState {

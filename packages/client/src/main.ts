@@ -1,7 +1,7 @@
 import { Application, Container, Graphics, Text, TextStyle } from "pixi.js";
 import { screenToTile } from "@go-op/map";
-import type { GameState, TilePos } from "@go-op/types";
-import type { ServerMessage } from "@go-op/protocol";
+import type { GameState, TilePos, Unit } from "@go-op/types";
+import { decodeServerMessage, applyStateDiff, type ServerMessage } from "@go-op/protocol";
 import {
   createGameSceneRenderer,
   type GameSceneRenderer,
@@ -11,6 +11,13 @@ import {
   sampleUnitPathAnimation,
   type UnitPathAnimation,
 } from "./movement-animation.js";
+import {
+  selectUnitByClick,
+  selectUnitsByBox,
+  normalizeBox,
+  unitAtPoint,
+  type TileBox,
+} from "./selection.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -24,6 +31,7 @@ const UNIT_LABEL_STYLE = new TextStyle({
   fill: 0xffffff,
   fontFamily: "monospace",
 });
+const UNIT_SELECTION_HIT_RADIUS_TILES = 0.5;
 
 // ---------------------------------------------------------------------------
 // State
@@ -38,6 +46,10 @@ const unitAnimations = new Map<string, UnitPathAnimation>();
 // Camera (pan offset)
 let cameraX = 0;
 let cameraY = 0;
+
+// Selection
+let selectedUnitIds = new Set<string>();
+let selectionBox: TileBox | null = null;
 
 // ---------------------------------------------------------------------------
 // PixiJS Setup
@@ -107,52 +119,90 @@ function syncScene(): void {
   renderFrame(performance.now());
 }
 
-function renderFrame(nowMs: number): void {
-  if (!sceneRenderer || !gameState) {
-    return;
+function getRenderableUnits(nowMs: number): readonly Unit[] {
+  if (!gameState) {
+    return [];
   }
 
-  let hasAnimatedUnits = false;
-  const units = gameState.units.map((unit) => {
+  return gameState.units.map((unit) => {
     const animation = unitAnimations.get(unit.id);
     if (!animation) {
       return unit;
     }
 
     const sample = sampleUnitPathAnimation(animation, nowMs);
-    if (sample.done) {
-      unitAnimations.delete(unit.id);
-      return unit;
-    }
-
-    hasAnimatedUnits = true;
     return {
       ...unit,
       pos: sample.pos,
     };
   });
+}
 
-  const renderState: GameState = hasAnimatedUnits
-    ? { ...gameState, units }
-    : gameState;
-  sceneRenderer.sync(renderState, lastPath);
+function reconcileAnimationsWithState(state: GameState): void {
+  for (const unit of state.units) {
+    const animation = unitAnimations.get(unit.id);
+    if (!animation) {
+      continue;
+    }
+
+    const destination = animation.path[animation.path.length - 1]!;
+    if (destination.x === unit.pos.x && destination.y === unit.pos.y) {
+      unitAnimations.delete(unit.id);
+    }
+  }
+}
+
+function renderFrame(nowMs: number): void {
+  if (!sceneRenderer || !gameState) {
+    return;
+  }
+
+  const units = getRenderableUnits(nowMs);
+  const renderState: GameState = { ...gameState, units };
+  sceneRenderer.sync(renderState, lastPath, selectedUnitIds, selectionBox);
 }
 
 // ---------------------------------------------------------------------------
 // Input Handling
 // ---------------------------------------------------------------------------
 
-let isDragging = false;
+/** Minimum pixel movement to distinguish a drag from a click. */
+const CLICK_THRESHOLD = 5;
+
+let pointerDown = false;
+let pointerButton = -1;
+let pointerShift = false;
 let dragStartX = 0;
 let dragStartY = 0;
 let dragCameraStartX = 0;
 let dragCameraStartY = 0;
 
+function screenToTilePos(
+  screenX: number,
+  screenY: number,
+): { tileX: number; tileY: number } {
+  const worldX = screenX - cameraX;
+  const worldY = screenY - cameraY;
+  return screenToTile(worldX, worldY, TILE_WIDTH, TILE_HEIGHT);
+}
+
+function isInBounds(tileX: number, tileY: number): boolean {
+  return (
+    !!gameState &&
+    tileX >= 0 &&
+    tileX < gameState.map.width &&
+    tileY >= 0 &&
+    tileY < gameState.map.height
+  );
+}
+
 function setupInput(): () => void {
   const canvas = app.canvas;
 
   const onPointerDown = (e: PointerEvent): void => {
-    isDragging = true;
+    pointerDown = true;
+    pointerButton = e.button;
+    pointerShift = e.shiftKey;
     dragStartX = e.clientX;
     dragStartY = e.clientY;
     dragCameraStartX = cameraX;
@@ -160,24 +210,61 @@ function setupInput(): () => void {
   };
 
   const onPointerMove = (e: PointerEvent): void => {
-    if (!isDragging) return;
-    cameraX = dragCameraStartX + (e.clientX - dragStartX);
-    cameraY = dragCameraStartY + (e.clientY - dragStartY);
-    sceneRenderer?.setCamera(cameraX, cameraY);
-  };
+    if (!pointerDown) return;
 
-  const onPointerUp = (e: PointerEvent): void => {
-    const dx = Math.abs(e.clientX - dragStartX);
-    const dy = Math.abs(e.clientY - dragStartY);
-    isDragging = false;
+    const dx = e.clientX - dragStartX;
+    const dy = e.clientY - dragStartY;
+    const moved = Math.abs(dx) >= CLICK_THRESHOLD || Math.abs(dy) >= CLICK_THRESHOLD;
 
-    // If the pointer barely moved, treat as a click
-    if (dx < 5 && dy < 5) {
-      handleClick(e.clientX, e.clientY);
+    if (!moved) return;
+
+    if (pointerButton === 2) {
+      // Right-drag → pan camera
+      cameraX = dragCameraStartX + dx;
+      cameraY = dragCameraStartY + dy;
+      sceneRenderer?.setCamera(cameraX, cameraY);
+    } else if (pointerButton === 0) {
+      // Left-drag → selection box
+      const start = screenToTilePos(dragStartX, dragStartY);
+      const end = screenToTilePos(e.clientX, e.clientY);
+      selectionBox = normalizeBox(
+        { x: start.tileX, y: start.tileY },
+        { x: end.tileX, y: end.tileY },
+      );
     }
   };
 
-  // Prevent context menu
+  const onPointerUp = (e: PointerEvent): void => {
+    if (!pointerDown) return;
+
+    const dx = Math.abs(e.clientX - dragStartX);
+    const dy = Math.abs(e.clientY - dragStartY);
+    const isClick = dx < CLICK_THRESHOLD && dy < CLICK_THRESHOLD;
+
+    if (pointerButton === 0) {
+      // Left button
+      if (isClick) {
+        handleLeftClick(e.clientX, e.clientY, pointerShift);
+      } else if (selectionBox && gameState) {
+        // Finish drag-box selection
+        selectedUnitIds = selectUnitsByBox(
+          gameState.units,
+          selectionBox,
+          selectedUnitIds,
+          pointerShift,
+        );
+      }
+      selectionBox = null;
+    } else if (pointerButton === 2 && isClick) {
+      // Right-click → move command
+      handleRightClick(e.clientX, e.clientY);
+    }
+
+    pointerDown = false;
+    pointerButton = -1;
+  };
+
+  // Prevent context menu on the game canvas
   const onContextMenu = (e: MouseEvent): void => e.preventDefault();
 
   canvas.addEventListener("pointerdown", onPointerDown);
@@ -193,43 +280,41 @@ function setupInput(): () => void {
   };
 }
 
-function handleClick(screenX: number, screenY: number): void {
-  if (!gameState || !ws) return;
+function handleLeftClick(
+  screenX: number,
+  screenY: number,
+  isShift: boolean,
+): void {
+  if (!gameState) return;
 
-  // Convert screen coords to world coords
-  const worldX = screenX - cameraX;
-  const worldY = screenY - cameraY;
+  const { tileX, tileY } = screenToTilePos(screenX, screenY);
+  if (!isInBounds(tileX, tileY)) return;
 
-  // Convert to tile coords
-  const { tileX, tileY } = screenToTile(
-    worldX,
-    worldY,
-    TILE_WIDTH,
-    TILE_HEIGHT,
+  const clickedUnitId = unitAtPoint(
+    getRenderableUnits(performance.now()),
+    { x: tileX, y: tileY },
+    UNIT_SELECTION_HIT_RADIUS_TILES,
   );
+  selectedUnitIds = selectUnitByClick(clickedUnitId, selectedUnitIds, isShift);
+}
 
-  // Check bounds
-  if (
-    tileX < 0 ||
-    tileX >= gameState.map.width ||
-    tileY < 0 ||
-    tileY >= gameState.map.height
-  ) {
-    return;
+function handleRightClick(screenX: number, screenY: number): void {
+  if (!gameState || !ws || selectedUnitIds.size === 0) return;
+
+  const { tileX, tileY } = screenToTilePos(screenX, screenY);
+  if (!isInBounds(tileX, tileY)) return;
+
+  const target = { x: tileX, y: tileY };
+
+  for (const unitId of selectedUnitIds) {
+    ws.send(JSON.stringify({
+      type: "move",
+      unitId,
+      target,
+    }));
   }
 
-  // Send move request for the first unit
-  const unit = gameState.units[0];
-  if (!unit) return;
-
-  const msg = JSON.stringify({
-    type: "move",
-    unitId: unit.id,
-    target: { x: tileX, y: tileY },
-  });
-  ws.send(msg);
-
-  statusEl.textContent = `Moving ${unit.id} to (${tileX}, ${tileY})…`;
+  statusEl.textContent = `Moving ${selectedUnitIds.size} unit(s) to (${tileX}, ${tileY})…`;
 }
 
 // ---------------------------------------------------------------------------
@@ -245,31 +330,41 @@ function connectToServer(): () => void {
   };
 
   const onMessage = (event: MessageEvent): void => {
-    const msg = JSON.parse(event.data as string) as ServerMessage;
+    const msg = decodeServerMessage(event.data as string) as ServerMessage;
 
     if (msg.type === "state") {
       gameState = msg.state;
+      reconcileAnimationsWithState(msg.state);
       syncScene();
+    } else if (msg.type === "stateDiff") {
+      if (gameState) {
+        gameState = applyStateDiff(gameState, msg);
+        reconcileAnimationsWithState(gameState);
+        syncScene();
+      }
     } else if (msg.type === "moveResult") {
       if (msg.success) {
-        lastPath = [...msg.path];
-
-        const unit = gameState?.units.find((entry) => entry.id === msg.unitId);
-        const animation = createUnitPathAnimation(
-          msg.path,
-          unit?.speedTilesPerSecond ?? 1,
-          performance.now(),
-          unit?.pos,
-        );
-        if (animation) {
-          unitAnimations.set(msg.unitId, animation);
-        }
-
-        statusEl.textContent = `Moving to (${msg.path[msg.path.length - 1]!.x}, ${msg.path[msg.path.length - 1]!.y})...`;
+        statusEl.textContent = `Move accepted for ${msg.unitId}`;
         syncScene();
       } else {
         statusEl.textContent = "Move failed!";
       }
+    } else if (msg.type === "unitStep") {
+      unitAnimations.delete(msg.unitId);
+
+      const speedTilesPerSecond = 1000 / msg.durationMs;
+      const animation = createUnitPathAnimation(
+        [msg.from, msg.to],
+        speedTilesPerSecond,
+        performance.now(),
+      );
+      if (animation) {
+        unitAnimations.set(msg.unitId, animation);
+      }
+
+      lastPath = [msg.from, msg.to];
+      statusEl.textContent = `Moving ${msg.unitId} to (${msg.to.x}, ${msg.to.y})...`;
+      syncScene();
     } else if (msg.type === "error") {
       statusEl.textContent = `Error: ${msg.message}`;
     }

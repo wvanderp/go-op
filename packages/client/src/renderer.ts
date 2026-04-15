@@ -1,5 +1,6 @@
 import { tileToScreen } from "@go-op/map";
 import { TileType, type GameState, type TileMap, type TilePos, type Unit } from "@go-op/types";
+import type { TileBox } from "./selection.js";
 
 export interface ScenePoint {
   readonly x: number;
@@ -63,7 +64,12 @@ export interface CreateGameSceneRendererOptions {
 
 export interface GameSceneRenderer {
   setCamera(x: number, y: number): void;
-  sync(state: GameState, highlightedPath?: readonly TilePos[] | null): void;
+  sync(
+    state: GameState,
+    highlightedPath?: readonly TilePos[] | null,
+    selectedUnitIds?: ReadonlySet<string>,
+    selectionBox?: TileBox | null,
+  ): void;
   destroy(): void;
 }
 
@@ -84,6 +90,14 @@ const TILE_STROKE_WIDTH = 1;
 const UNIT_RADIUS = 10;
 const UNIT_VERTICAL_OFFSET = 8;
 const UNIT_LABEL_OFFSET = 22;
+const SELECTION_RING_RADIUS = 14;
+const SELECTION_RING_COLOR = 0x00ff00;
+const SELECTION_RING_WIDTH = 2;
+const SELECTION_BOX_FILL_COLOR = 0x00ff00;
+const SELECTION_BOX_FILL_ALPHA = 0.15;
+const SELECTION_BOX_STROKE_COLOR = 0x00ff00;
+const SELECTION_BOX_STROKE_WIDTH = 1;
+const SELECTION_BOX_STROKE_ALPHA = 0.8;
 
 export function createGameSceneRenderer(
   options: CreateGameSceneRendererOptions,
@@ -93,6 +107,7 @@ export function createGameSceneRenderer(
   const mapLayer = factory.createContainer();
   const unitLayer = factory.createContainer();
   const mapGraphic = factory.createGraphics();
+  const overlayGraphic = factory.createGraphics();
   const unitVisuals = new Map<string, UnitVisual>();
 
   let renderedMap: TileMap | null = null;
@@ -102,6 +117,7 @@ export function createGameSceneRenderer(
   worldContainer.addChild(mapLayer);
   worldContainer.addChild(unitLayer);
   mapLayer.addChild(mapGraphic);
+  mapLayer.addChild(overlayGraphic);
 
   return {
     setCamera(x: number, y: number): void {
@@ -109,7 +125,12 @@ export function createGameSceneRenderer(
       worldContainer.y = y;
     },
 
-    sync(state: GameState, highlightedPath: readonly TilePos[] | null = null): void {
+    sync(
+      state: GameState,
+      highlightedPath: readonly TilePos[] | null = null,
+      selectedUnitIds: ReadonlySet<string> = new Set(),
+      selectionBox: TileBox | null = null,
+    ): void {
       const nextPathKey = pathKey(highlightedPath);
 
       if (renderedMap !== state.map || renderedPathKey !== nextPathKey) {
@@ -124,7 +145,8 @@ export function createGameSceneRenderer(
         renderedPathKey = nextPathKey;
       }
 
-      syncUnits(unitLayer, unitVisuals, state.units, factory, tileWidth, tileHeight);
+      syncUnits(unitLayer, unitVisuals, state.units, factory, tileWidth, tileHeight, selectedUnitIds);
+      drawSelectionBox(overlayGraphic, selectionBox, tileWidth, tileHeight);
     },
 
     destroy(): void {
@@ -134,11 +156,13 @@ export function createGameSceneRenderer(
       }
 
       mapLayer.removeChild(mapGraphic);
+      mapLayer.removeChild(overlayGraphic);
       worldContainer.removeChild(mapLayer);
       worldContainer.removeChild(unitLayer);
       stage.removeChild(worldContainer);
 
       mapGraphic.destroy();
+      overlayGraphic.destroy();
       mapLayer.destroy();
       unitLayer.destroy();
       worldContainer.destroy();
@@ -186,6 +210,7 @@ function syncUnits(
   factory: SceneFactory,
   tileWidth: number,
   tileHeight: number,
+  selectedUnitIds: ReadonlySet<string> = new Set(),
 ): void {
   const nextUnitIds = new Set<string>();
 
@@ -204,7 +229,7 @@ function syncUnits(
       unitVisuals.set(unit.id, visual);
     }
 
-    updateUnitVisual(visual, unit, tileWidth, tileHeight);
+    updateUnitVisual(visual, unit, tileWidth, tileHeight, selectedUnitIds.has(unit.id));
   }
 
   for (const [unitId, visual] of unitVisuals) {
@@ -222,10 +247,17 @@ function updateUnitVisual(
   unit: Unit,
   tileWidth: number,
   tileHeight: number,
+  isSelected: boolean,
 ): void {
   const { sx, sy } = tileToScreen(unit.pos.x, unit.pos.y, tileWidth, tileHeight);
 
   visual.marker.clear();
+
+  if (isSelected) {
+    visual.marker.circle(0, 0, SELECTION_RING_RADIUS);
+    visual.marker.stroke({ color: SELECTION_RING_COLOR, width: SELECTION_RING_WIDTH });
+  }
+
   visual.marker.circle(0, 0, UNIT_RADIUS);
   visual.marker.fill({ color: UNIT_BODY_COLOR });
   visual.marker.stroke({ color: UNIT_STROKE_COLOR, width: 2 });
@@ -262,4 +294,36 @@ function pathKey(path: readonly TilePos[] | null): string {
 
 function tileKey(tile: TilePos): string {
   return `${tile.x},${tile.y}`;
+}
+
+function drawSelectionBox(
+  graphic: SceneGraphic,
+  box: TileBox | null,
+  tileWidth: number,
+  tileHeight: number,
+): void {
+  graphic.clear();
+  if (!box) return;
+
+  const halfW = tileWidth / 2;
+  const halfH = tileHeight / 2;
+
+  // Anchor to actual tile corners so drag-box starts/ends on tile edges.
+  const topTile = tileToScreen(box.minX, box.minY, tileWidth, tileHeight);
+  const rightTile = tileToScreen(box.maxX, box.minY, tileWidth, tileHeight);
+  const bottomTile = tileToScreen(box.maxX, box.maxY, tileWidth, tileHeight);
+  const leftTile = tileToScreen(box.minX, box.maxY, tileWidth, tileHeight);
+
+  graphic.poly([
+    { x: topTile.sx, y: topTile.sy - halfH },
+    { x: rightTile.sx + halfW, y: rightTile.sy },
+    { x: bottomTile.sx, y: bottomTile.sy + halfH },
+    { x: leftTile.sx - halfW, y: leftTile.sy },
+  ]);
+  graphic.fill({ color: SELECTION_BOX_FILL_COLOR, alpha: SELECTION_BOX_FILL_ALPHA });
+  graphic.stroke({
+    color: SELECTION_BOX_STROKE_COLOR,
+    width: SELECTION_BOX_STROKE_WIDTH,
+    alpha: SELECTION_BOX_STROKE_ALPHA,
+  });
 }

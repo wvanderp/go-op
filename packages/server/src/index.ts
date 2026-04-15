@@ -11,6 +11,7 @@ import {
 import {
   encodeMessage,
   decodeClientMessage,
+  computeStateDiff,
   type ServerMessage,
 } from "@go-op/protocol";
 
@@ -28,7 +29,7 @@ interface ActiveMovement {
   readonly unitId: string;
   readonly path: readonly TilePos[];
   readonly nextIndex: number;
-  readonly progressTiles: number;
+  readonly elapsedMs: number;
 }
 
 interface CreateGameServerOptions {
@@ -63,6 +64,8 @@ export function createGameServer(
   let actualPort = port;
   let tickTimer: ReturnType<typeof setInterval> | null = null;
   let lastTickAtMs = 0;
+  let tickCount = 0;
+  let previousTickUnits: readonly Unit[] = [];
   const tickMs = Math.max(10, options.tickMs ?? DEFAULT_SERVER_TICK_MS);
   const now = options.now ?? (() => Date.now());
   const activeMovements = new Map<string, ActiveMovement>();
@@ -71,8 +74,8 @@ export function createGameServer(
   let state: GameState = {
     map: createInitialMap(),
     units: [
-      { id: "unit-1", pos: createTilePos(0, 0), speedTilesPerSecond: 1 },
-      { id: "unit-2", pos: createTilePos(2, 2), speedTilesPerSecond: 1 },
+      { id: "unit-1", pos: createTilePos(0, 0), speedTilesPerSecond: 1, action: { type: "idle" } },
+      { id: "unit-2", pos: createTilePos(2, 2), speedTilesPerSecond: 1, action: { type: "idle" } },
     ],
   };
 
@@ -87,73 +90,89 @@ export function createGameServer(
     ws.send(encodeMessage(msg));
   }
 
-  function updateUnitPosition(
+  function updateUnit(
     units: readonly Unit[],
     unitId: string,
-    pos: TilePos,
+    updates: Partial<Pick<Unit, "pos" | "action">>,
   ): readonly Unit[] {
     return units.map((unit) =>
-      unit.id === unitId ? { ...unit, pos } : unit,
+      unit.id === unitId ? { ...unit, ...updates } : unit,
     );
   }
 
-  function stepMovements(deltaMs: number): boolean {
-    if (activeMovements.size === 0) {
-      return false;
-    }
-
-    const deltaSeconds = deltaMs / 1000;
-    let movedAnyUnit = false;
+  function tickEntities(deltaMs: number): void {
+    const clampedDeltaMs = Math.max(0, deltaMs);
     let nextUnits = state.units;
 
-    for (const [unitId, movement] of [...activeMovements.entries()]) {
-      const unit = state.units.find((entry) => entry.id === unitId)!;
-      const speed = Math.max(0, unit.speedTilesPerSecond);
+    for (const unit of state.units) {
+      const movement = activeMovements.get(unit.id);
+      if (!movement) {
+        // Idle entity — visited but no changes this tick
+        continue;
+      }
 
-      let progressTiles = movement.progressTiles + speed * deltaSeconds;
+      const speed = Math.max(0, unit.speedTilesPerSecond);
+      const durationMs = Math.max(1, Math.round(1000 / Math.max(speed, 0.001)));
+
+      const stepDurationMs = durationMs;
+      let elapsedMs = movement.elapsedMs + clampedDeltaMs;
       let nextIndex = movement.nextIndex;
       let latestPos: TilePos | null = null;
 
-      while (progressTiles >= 1 && nextIndex < movement.path.length) {
+      if (elapsedMs >= stepDurationMs && nextIndex < movement.path.length) {
         latestPos = movement.path[nextIndex]!;
         nextIndex += 1;
-        progressTiles -= 1;
+        // Reset elapsed time after each committed tile step so units cannot
+        // skip multiple tiles instantly due to one large server delta.
+        elapsedMs = 0;
+
+        if (nextIndex < movement.path.length) {
+          broadcast({
+            type: "unitStep",
+            unitId: unit.id,
+            from: movement.path[nextIndex - 1]!,
+            to: movement.path[nextIndex]!,
+            durationMs,
+          });
+        }
       }
 
       if (latestPos) {
-        nextUnits = updateUnitPosition(nextUnits, unitId, latestPos);
-        movedAnyUnit = true;
+        nextUnits = updateUnit(nextUnits, unit.id, { pos: latestPos });
       }
 
       if (nextIndex >= movement.path.length) {
-        activeMovements.delete(unitId);
+        activeMovements.delete(unit.id);
+        nextUnits = updateUnit(nextUnits, unit.id, { action: { type: "idle" } });
       } else {
-        activeMovements.set(unitId, {
-          unitId,
+        activeMovements.set(unit.id, {
+          unitId: unit.id,
           path: movement.path,
           nextIndex,
-          progressTiles,
+          elapsedMs,
         });
       }
     }
 
-    if (!movedAnyUnit) {
-      return false;
-    }
-
     state = { ...state, units: nextUnits };
-    return true;
   }
 
   function startTickLoop(): void {
     lastTickAtMs = now();
+    previousTickUnits = state.units;
     tickTimer = setInterval(() => {
       const current = now();
       const deltaMs = current - lastTickAtMs;
       lastTickAtMs = current;
+      tickCount += 1;
 
-      if (stepMovements(deltaMs)) {
-        broadcast({ type: "state", state });
+      const snapshotBefore = previousTickUnits;
+      tickEntities(deltaMs);
+      previousTickUnits = state.units;
+
+      const diff = computeStateDiff(snapshotBefore, state.units, tickCount);
+      if (diff.unitUpdates.length > 0) {
+        broadcast(diff);
       }
     }, tickMs);
   }
@@ -194,22 +213,43 @@ export function createGameServer(
       return;
     }
 
+    let firstStep: Extract<ServerMessage, { type: "unitStep" }> | null = null;
+
     if (path.length > 1) {
+      const speed = Math.max(0, unit.speedTilesPerSecond);
+      const durationMs = Math.max(1, Math.round(1000 / Math.max(speed, 0.001)));
       activeMovements.set(clientMsg.unitId, {
         unitId: clientMsg.unitId,
         path,
         nextIndex: 1,
-        progressTiles: 0,
+        elapsedMs: 0,
       });
+      state = {
+        ...state,
+        units: updateUnit(state.units, clientMsg.unitId, {
+          action: { type: "moving" },
+        }),
+      };
+
+      firstStep = {
+        type: "unitStep",
+        unitId: clientMsg.unitId,
+        from: path[0]!,
+        to: path[1]!,
+        durationMs,
+      };
     }
 
     // Broadcast move result. State is broadcast as movement progresses.
     broadcast({
       type: "moveResult",
       unitId: clientMsg.unitId,
-      path,
       success: true,
     });
+
+    if (firstStep) {
+      broadcast(firstStep);
+    }
   }
 
   return {

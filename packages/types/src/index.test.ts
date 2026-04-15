@@ -100,23 +100,25 @@ describe("isWalkable", () => {
 });
 
 describe("type shapes", () => {
-  it("Unit has id, pos, and movement speed", () => {
+  it("Unit has id, pos, movement speed, and action", () => {
     const unit: Unit = {
       id: "u1",
       pos: createTilePos(5, 3),
       speedTilesPerSecond: 2,
+      action: { type: "idle" },
     };
     expect(unit.id).toBe("u1");
     expect(unit.pos.x).toBe(5);
     expect(unit.pos.y).toBe(3);
     expect(unit.speedTilesPerSecond).toBe(2);
+    expect(unit.action.type).toBe("idle");
   });
 
   it("GameState has map and units", () => {
     const map: TileMap = { width: 2, height: 2, tiles: [0, 0, 0, 0] };
     const state: GameState = {
       map,
-      units: [{ id: "u1", pos: createTilePos(0, 0), speedTilesPerSecond: 1 }],
+      units: [{ id: "u1", pos: createTilePos(0, 0), speedTilesPerSecond: 1, action: { type: "idle" } }],
     };
     expect(state.map).toBe(map);
     expect(state.units).toHaveLength(1);

@@ -19,28 +19,16 @@ describe("createUnitPathAnimation", () => {
     ).toBeNull();
   });
 
-  it("starts from the authoritative unit position within the path", () => {
+  it("creates an animation starting at the beginning of the path", () => {
     const animation = createUnitPathAnimation(
       [createTilePos(0, 0), createTilePos(1, 0), createTilePos(2, 0)],
       1,
       1_000,
-      createTilePos(1, 0),
-    );
-
-    expect(animation).not.toBeNull();
-    expect(animation!.startProgressTiles).toBe(1);
-  });
-
-  it("falls back to the start when the authoritative position is not in the path", () => {
-    const animation = createUnitPathAnimation(
-      [createTilePos(0, 0), createTilePos(1, 0), createTilePos(2, 0)],
-      1,
-      1_000,
-      createTilePos(4, 4),
     );
 
     expect(animation).not.toBeNull();
     expect(animation!.startProgressTiles).toBe(0);
+    expect(animation!.path).toHaveLength(3);
   });
 });
 

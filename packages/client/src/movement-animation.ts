@@ -16,19 +16,16 @@ export function createUnitPathAnimation(
   path: readonly TilePos[],
   speedTilesPerSecond: number,
   startedAtMs: number,
-  currentPos?: TilePos,
 ): UnitPathAnimation | null {
   if (path.length < 2 || speedTilesPerSecond <= 0) {
     return null;
   }
 
-  const startProgressTiles = currentPos ? findPathIndex(path, currentPos) : 0;
-
   return {
     path,
     speedTilesPerSecond,
     startedAtMs,
-    startProgressTiles,
+    startProgressTiles: 0,
   };
 }
 
@@ -62,9 +59,4 @@ export function sampleUnitPathAnimation(
     },
     done: false,
   };
-}
-
-function findPathIndex(path: readonly TilePos[], pos: TilePos): number {
-  const index = path.findIndex((tile) => tile.x === pos.x && tile.y === pos.y);
-  return index < 0 ? 0 : index;
 }
