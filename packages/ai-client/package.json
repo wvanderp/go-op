@@ -11,7 +11,5 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@go-op/protocol": "workspace:*",
-    "@go-op/types": "workspace:*"
   }
 }

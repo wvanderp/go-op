@@ -7,7 +7,6 @@ const pkg = (name: string) =>
 export default defineConfig({
   resolve: {
     alias: {
-      "@go-op/math": pkg("math"),
       "@go-op/types": pkg("types"),
       "@go-op/map": pkg("map"),
       "@go-op/protocol": pkg("protocol"),

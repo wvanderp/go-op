@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
     devDependencies:
       '@types/ws':
         specifier: ^8.18.1
@@ -24,29 +28,10 @@ importers:
         specifier: ^8.20.0
         version: 8.20.0
 
-  packages/ai-client:
-    dependencies:
-      '@go-op/protocol':
-        specifier: workspace:*
-        version: link:../protocol
-      '@go-op/types':
-        specifier: workspace:*
-        version: link:../types
+  packages/ai-client: {}
 
   packages/client:
     dependencies:
-      '@go-op/map':
-        specifier: workspace:*
-        version: link:../map
-      '@go-op/math':
-        specifier: workspace:*
-        version: link:../math
-      '@go-op/protocol':
-        specifier: workspace:*
-        version: link:../protocol
-      '@go-op/types':
-        specifier: workspace:*
-        version: link:../types
       pixi.js:
         specifier: ^8.18.1
         version: 8.18.1
@@ -55,40 +40,10 @@ importers:
         specifier: ^8.0.8
         version: 8.0.8(@types/node@25.6.0)(esbuild@0.27.7)(tsx@4.21.0)
 
-  packages/map:
-    dependencies:
-      '@go-op/math':
-        specifier: workspace:*
-        version: link:../math
-      '@go-op/types':
-        specifier: workspace:*
-        version: link:../types
-
-  packages/math: {}
-
-  packages/protocol:
-    dependencies:
-      '@go-op/map':
-        specifier: workspace:*
-        version: link:../map
-      '@go-op/types':
-        specifier: workspace:*
-        version: link:../types
+  packages/protocol: {}
 
   packages/server:
     dependencies:
-      '@go-op/map':
-        specifier: workspace:*
-        version: link:../map
-      '@go-op/math':
-        specifier: workspace:*
-        version: link:../math
-      '@go-op/protocol':
-        specifier: workspace:*
-        version: link:../protocol
-      '@go-op/types':
-        specifier: workspace:*
-        version: link:../types
       ws:
         specifier: ^8.20.0
         version: 8.20.0
@@ -99,12 +54,6 @@ importers:
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
-
-  packages/types:
-    dependencies:
-      '@go-op/math':
-        specifier: workspace:*
-        version: link:../math
 
 packages:
 
@@ -848,6 +797,9 @@ packages:
       utf-8-validate:
         optional: true
 
+  zod@4.3.6:
+    resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
+
 snapshots:
 
   '@babel/helper-string-parser@7.27.1': {}
@@ -1413,3 +1365,5 @@ snapshots:
       stackback: 0.0.2
 
   ws@8.20.0: {}
+
+  zod@4.3.6: {}

@@ -17,8 +17,6 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@go-op/types": "workspace:*",
-    "@go-op/map": "workspace:*"
   },
   "files": ["dist"]
 }
